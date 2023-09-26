@@ -9,11 +9,11 @@ match {
     _
 }
 
-pub CompUnit: CompUnit = <items: (CompUnitItem)*> => CompUnit { <> };
+pub CompUnit: CompUnit = <items: (CompItem)*> => CompUnit { <> };
 
-CompUnitItem: CompUnitItem = {
-    <func_def: FuncDef> => CompUnitItem::Func(<>),
-    <decl: Decl> => CompUnitItem::Decl(<>),
+CompItem: CompItem = {
+    <func_def: FuncDef> => CompItem::Func(<>),
+    <decl: Decl> => CompItem::Decl(<>),
 }
 
 Decl: Decl = {
@@ -65,7 +65,7 @@ FuncDef: FuncDef = {
     <head: FuncHead> ")" <body: Block> => {
         FuncDef { ty: head.0, id: head.1, params: Vec::new(), body }
     },
-    <head: FuncHead> <param: FuncFParam> <mut params: ("," <FuncFParam>)*> ")" <body: Block> => {
+    <head: FuncHead> <param: FuncParam> <mut params: ("," <FuncParam>)*> ")" <body: Block> => {
         params.insert(0, param);
         FuncDef { ty: head.0, id: head.1, params, body }
     }
@@ -76,8 +76,8 @@ FuncHead: (FuncType, String) = {
     "void" <id: Ident> "(" => (FuncType::Void, id),
 }
 
-FuncFParam: FuncFParam = {
-    "int" <id: Ident> <dims: ("[" "]" <("[" <ConstExp> "]")*>)?> => FuncFParam { <> },
+FuncParam: FuncParam = {
+    "int" <id: Ident> <dims: ("[" "]" <("[" <ConstExp> "]")*>)?> => FuncParam { <> },
 }
 
 Block: Block = {
