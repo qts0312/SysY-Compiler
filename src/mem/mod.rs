@@ -4,7 +4,6 @@
 //! 
 //! In this module, three optimizations are performed:
 //! * documenting birth and death "time" of each value to allocate registers better.
-//! * documenting the numbers used in every function, loading them ahead.
 //! * when an expression can be evaluated, replace it with the number.
 //! 
 
