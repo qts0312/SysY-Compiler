@@ -2,6 +2,7 @@ mod ast;
 mod tools;
 mod mem;
 mod ir;
+mod asm;
 
 use lalrpop_util::lalrpop_mod;
 use mem::generate_mem;
