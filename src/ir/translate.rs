@@ -20,6 +20,7 @@ pub trait Translate {
 impl Translate for Program {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
         for value in self.inst_layout() {
+            scope.set_cur_value(Some(value.clone()));
             match self.borrow_value(value.clone()).kind() {
                 ValueKind::GlobalAlloc(g) => g.translate(program, scope, w),
                 _ => {}
@@ -29,6 +30,7 @@ impl Translate for Program {
         for func in self.func_layout() {
             scope.set_cur_func(Some(func.clone()));
             self.func(func.clone()).translate(program, scope, w);
+            scope.set_cur_func(None);
         }
     }
 }
@@ -118,8 +120,8 @@ impl Translate for ValueData {
 
 impl Translate for Return {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// return");
+        // w.line();
+        // w.note("// return");
         let val = self.value().as_ref().map_or("".to_string(), |v| {
             match value!(program, scope, v.clone()).kind() {
                 ValueKind::Integer(i) => i.value().to_string(),
@@ -132,8 +134,8 @@ impl Translate for Return {
 
 impl Translate for Binary {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// binary");
+        // w.line();
+        // w.note("// binary");
         let lhs = match value!(program, scope, self.lhs()).kind() {
             ValueKind::Integer(i) => i.value().to_string(),
             _ => scope.value(&self.lhs()).turn_into(())
@@ -167,8 +169,8 @@ impl Translate for Binary {
 
 impl Translate for Alloc {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// alloc");
+        // w.line();
+        // w.note("// alloc");
         match value!(program, scope, scope.cur_value().clone()).ty().kind() {
             TypeKind::Pointer(ty) => {
                 let label = match ty.kind() {
@@ -185,8 +187,8 @@ impl Translate for Alloc {
 
 impl Translate for Load {
     fn translate(&self, _: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// load");
+        // w.line();
+        // w.note("// load");
         let dst = scope.new_register();
         let src = scope.value(&self.src());
         w.load(&dst.turn_into(()), &src.turn_into(()));
@@ -196,9 +198,10 @@ impl Translate for Load {
 
 impl Translate for Store {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// store");
-        let src = match value!(program, scope, self.value()).kind() {
+        // w.line();
+        // w.note("// store");
+        let kind = value!(program, scope, self.value()).kind().clone();
+        let src = match kind {
             ValueKind::Integer(i) => i.value().to_string(),
             _ => scope.value(&self.value()).turn_into(())
         };
@@ -209,8 +212,8 @@ impl Translate for Store {
 
 impl Translate for Branch {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// branch");
+        // w.line();
+        // w.note("// branch");
         let cond = match value!(program, scope, self.cond()).kind() {
             ValueKind::Integer(i) => i.value().to_string(),
             _ => scope.value(&self.cond()).turn_into(())
@@ -223,8 +226,8 @@ impl Translate for Branch {
 
 impl Translate for Jump {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// jump");
+        // w.line();
+        // w.note("// jump");
         let dst = program.func(scope.cur_func().clone()).dfg().bb(self.target()).name().as_ref().unwrap();
         w.jump(dst);
     }
@@ -232,8 +235,8 @@ impl Translate for Jump {
 
 impl Translate for Call {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// call");
+        // w.line();
+        // w.note("// call");
         let dst = scope.new_register();
         let dst_name = dst.turn_into(());
         scope.new_value(scope.cur_value().clone(), dst.clone());
@@ -258,8 +261,8 @@ impl Translate for Call {
 
 impl Translate for GetElemPtr {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// get elem ptr");
+        // w.line();
+        // w.note("// get elem ptr");
         let dst = scope.new_register();
         scope.new_value(scope.cur_value().clone(), dst.clone());
         let src = scope.value(&self.src());
@@ -273,8 +276,8 @@ impl Translate for GetElemPtr {
 
 impl Translate for GetPtr {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
-        w.note("// get ptr");
+        // w.line();
+        // w.note("// get ptr");
         let dst = scope.new_register();
         scope.new_value(scope.cur_value().clone(), dst.clone());
         let src = scope.value(&self.src());
@@ -288,7 +291,7 @@ impl Translate for GetPtr {
 
 impl Translate for GlobalAlloc {
     fn translate(&self, program: &Program, scope: &mut Scope, w: &mut Writer) {
-        w.line();
+        // w.line();
         let ty = w.to_type(self.init(), program);
         let label = match ty.kind() {
             TypeKind::Array(_, _) => scope.label_mut().global_arr(),

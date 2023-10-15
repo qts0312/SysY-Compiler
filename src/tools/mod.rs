@@ -85,8 +85,10 @@ pub fn global_array_init(program: &mut Program, values: Vec<Value>, array_info: 
         let mut elems = vec![];
         let elem_len = next_array_info.iter().fold(1, |acc, &x| acc * x);
 
+
+
         for i in 0..values.len() {
-            next_values.push(values[i].clone());
+            next_values.push(values[i]);
             if (i + 1) % elem_len == 0 {
                 elems.push(global_array_init(program, next_values, next_array_info.clone()));
                 next_values = vec![];

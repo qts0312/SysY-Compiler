@@ -10,7 +10,7 @@ use crate::tools::get_size_form_ty;
 use crate::mem::info::Info;
 use koopa::ir::{ Program, FunctionData, Value, ValueKind, TypeKind, BinaryOp };
 use koopa::ir::entities::ValueData;
-use koopa::ir::values::{ Integer, Return, Binary, Alloc };
+use koopa::ir::values::{ Integer, Return, Binary, Alloc, Load };
 
 pub trait Asm {
     fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info);
@@ -289,5 +289,23 @@ impl Asm for Alloc {
 
         let slot = scope.new_slots(size);
         scope.new_value(value, Entry::Slot(slot));
+    }
+}
+
+impl Asm for Load {
+    fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        let is_addr = if self.src().is_global() {
+            match program.borrow_value(self.src()).kind() {
+                ValueKind::GetElemPtr(_) => true,
+                ValueKind::GetPtr(_) => true,
+                _ => false,
+            }
+        } else {
+            match program.func(scope.cur_func().clone()).dfg().value(self.src()).kind() {
+                ValueKind::GetElemPtr(_) => true,
+                ValueKind::GetPtr(_) => true,
+                _ => false,
+            }
+        };
     }
 }

@@ -137,13 +137,11 @@ impl<'ast> Create<'ast> for ConstInitVal {
                             let mut len = base;
 
                             for num in cur_array_info.iter().rev().skip(1) {
-                                if count % len == 0 {
-                                    begin -= 1;
-                                    len *= *num;
-                                }
-                                else {
+                                if count % (len * (*num)) != 0 || begin <= 1 {
                                     break;
                                 }
+                                begin -= 1;
+                                len *= *num;
                             }
 
                             scope.set_array_info(cur_array_info[begin..].to_vec());
@@ -224,10 +222,19 @@ impl<'ast> Create<'ast> for VarDef {
             scope.set_array_info(array_info.clone());
 
             if scope.is_global() {
-                let init = self.init.as_ref().map_or(vec![program.new_value().integer(0); array_info.iter().fold(1, |acc, num| acc * num)], |val| {
-                    val.create(program, scope, info)
-                });
-                let init = global_array_init(program, init, array_info);
+                let init = match &self.init {
+                    Some(val) => {
+                        let init = val.create(program, scope, info);
+                        global_array_init(program, init, array_info)
+                    }
+                    None => {
+                        // In this path, we will give a simple way to initialize an array with all zero.
+                        let zero = program.new_value().integer(0);
+                        let value = global_array_init(program, vec![zero; array_info.iter().fold(1, |acc, num| acc * num)], array_info.clone());
+                        info.new_array_info(value.clone(), array_info.clone());
+                        value
+                    }
+                };
                 let global_alloc = program.new_value().global_alloc(init);
                 info.new_info(global_alloc.clone());
                 scope.new_value(&self.id, Entry::Value(global_alloc));
@@ -282,7 +289,12 @@ impl<'ast> Create<'ast> for InitVal {
                 for elem in list.iter() {
                     match elem {
                         Self::Exp(exp) => {
-                            result.push(exp.create(program, scope, info));
+                            if scope.is_global() {
+                                result.push(program.new_value().integer(exp.evaluate(scope).unwrap()));
+                            }
+                            else {
+                                result.push(exp.create(program, scope, info));
+                            }
                             count += 1;
                         }
                         Self::List(_) => {
@@ -296,13 +308,11 @@ impl<'ast> Create<'ast> for InitVal {
                             let mut len = base;
 
                             for num in cur_array_info.iter().rev().skip(1) {
-                                if count % len == 0 {
-                                    begin -= 1;
-                                    len *= *num;
-                                }
-                                else {
+                                if count % (len * (*num)) != 0 || begin <= 1 {
                                     break;
                                 }
+                                begin -= 1;
+                                len *= *num;
                             }
 
                             scope.set_array_info(cur_array_info[begin..].to_vec());
@@ -333,6 +343,10 @@ impl<'ast> Create<'ast> for FuncDef {
         scope.set_cur_func(Some(func.clone()));
         scope.enter();
 
+        let entry = new_bb!(program, scope).basic_block(Some(format!("%entry")));
+        push_bb!(program, scope, entry.clone());
+        scope.set_cur_bb(Some(entry.clone()));
+
         let mut count = 0;
         let data = program.func(func.clone());
         let params: Vec<_> = data.params().iter().map(|param| param.clone()).collect();
@@ -345,16 +359,12 @@ impl<'ast> Create<'ast> for FuncDef {
             push_value!(program, scope, store.clone());
             info.new_info(store.clone());
 
-            info.info_mut(param.clone()).unwrap().death = info.counter();
+            // info.info_mut(param.clone()).unwrap().death = info.counter();
             info.info_mut(alloc).unwrap().death = info.counter();
 
             scope.new_value(&self.params[count].id, Entry::Value(alloc));
             count += 1;
         }
-
-        let entry = new_bb!(program, scope).basic_block(Some(format!("%entry")));
-        push_bb!(program, scope, entry.clone());
-        scope.set_cur_bb(Some(entry.clone()));
 
         self.body.create(program, scope, info);
 

@@ -127,7 +127,10 @@ impl Eval for LAndExp {
                 if left == 0 {
                     Some(0)
                 } else {
-                    eq.evaluate(scope)
+                    match eq.evaluate(scope) {
+                        Some(num) => Some((num != 0) as i32),
+                        None => None,
+                    }
                 }
             }
         }
@@ -143,7 +146,10 @@ impl Eval for LOrExp {
                 if left != 0 {
                     Some(1)
                 } else {
-                    land.evaluate(scope)
+                    match land.evaluate(scope) {
+                        Some(num) => Some((num != 0) as i32),
+                        None => None,
+                    }
                 }
             }
         }

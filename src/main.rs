@@ -10,6 +10,7 @@ use ir::generate_ir;
 use std::env::args;
 use std::fs::read_to_string;
 use std::io::Result;
+use std::time::SystemTime;
 
 lalrpop_mod!(sysy);
 
@@ -24,11 +25,15 @@ fn main() -> Result<()> {
     let input = read_to_string(input)?;
     let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
 
+    println!("start mem: {}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
     let (program, info) = generate_mem(&ast);
+    println!("end mem: {}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
 
     if mode == "-koopa" {
-        generate_ir(&program, &output);
-    } 
+        println!("start ir: {}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+        generate_ir(&program, &output, &info);
+        println!("end ir: {}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+    }
     else {
 
     }

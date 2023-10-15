@@ -14,6 +14,7 @@ pub struct ValueInfo {
 pub struct Info {
     counter: usize,
     value_infos: HashMap<Value, ValueInfo>,
+    zero_array_infos: HashMap<Value, Vec<usize>>,
 }
 
 impl Info {
@@ -21,6 +22,7 @@ impl Info {
         Info {
             counter: 0,
             value_infos: HashMap::new(),
+            zero_array_infos: HashMap::new(),
         }
     }
 
@@ -42,5 +44,13 @@ impl Info {
 
     pub fn info_mut(&mut self, value: Value) -> Option<&mut ValueInfo> {
         self.value_infos.get_mut(&value)
+    }
+
+    pub fn new_array_info(&mut self, value: Value, info: Vec<usize>) {
+        self.zero_array_infos.insert(value, info);
+    }
+
+    pub fn array_info(&self, value: Value) -> Option<&Vec<usize>> {
+        self.zero_array_infos.get(&value)
     }
 }

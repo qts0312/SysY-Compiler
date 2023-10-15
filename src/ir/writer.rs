@@ -5,15 +5,20 @@
 
 use std::fs::File;
 use std::io::Write;
+use crate::mem::info::Info;
 use koopa::ir::{ Program, Value, ValueKind, Type, TypeKind };
 
 pub struct Writer<'f> {
     f: &'f mut File,
+    info: &'f Info,
 }
 
 impl<'f> Writer<'f> {
-    pub fn new(f: &'f mut File) -> Self {
-        Self { f }
+    pub fn new(f: &'f mut File, info: &'f Info) -> Self {
+        Self {
+            f,
+            info,
+        }
     }
 
     pub fn note(&mut self, s: &str) {
@@ -85,7 +90,7 @@ impl<'f> Writer<'f> {
     }
 
     pub fn op3(&mut self, op: &str, dst: &str, lhs: &str, rhs: &str) {
-        writeln!(self.f, "  {} = {} {} {}", dst, op, lhs, rhs).unwrap();
+        writeln!(self.f, "  {} = {} {}, {}", dst, op, lhs, rhs).unwrap();
     }
 
     pub fn ret(&mut self, val: &str) {
@@ -97,7 +102,7 @@ impl<'f> Writer<'f> {
     }
 
     pub fn store(&mut self, dst: &str, src: &str) {
-        writeln!(self.f, "  store {}, {}", dst, src).unwrap();
+        writeln!(self.f, "  store {}, {}", src, dst).unwrap();
     }
 
     pub fn branch(&mut self, cond: &str, then: &str, els: &str) {
@@ -154,18 +159,23 @@ impl<'f> Writer<'f> {
             ValueKind::Integer(i) => i.value().to_string(),
             ValueKind::ZeroInit(_) => "zeroinit".to_string(),
             ValueKind::Aggregate(a) => {
-                let mut result = "{".to_string();
-                let mut first = true;
-                for value in a.elems() {
-                    if first {
-                        first = false;
-                    } else {
-                        result.push_str(", ");
+                match self.info.array_info(value) {
+                    Some(_) => "zeroinit".to_string(),
+                    None => {
+                        let mut result = "{".to_string();
+                        let mut first = true;
+                        for value in a.elems() {
+                            if first {
+                                first = false;
+                            } else {
+                                result.push_str(", ");
+                            }
+                            result.push_str(&self.to_init(*value, program));
+                        }
+                        result.push_str("}");
+                        result
                     }
-                    result.push_str(&self.to_init(*value, program));
                 }
-                result.push_str("}");
-                result
             }
             _ => panic!("init shouldn't be this kind")
         }
@@ -175,8 +185,22 @@ impl<'f> Writer<'f> {
         match program.borrow_value(value).kind() {
             ValueKind::Integer(_) => Type::get_i32(),
             ValueKind::ZeroInit(_) => Type::get_i32(),
-            ValueKind::Aggregate(a) => Type::get_array(program.borrow_value(a.elems()[0]).ty().clone(), a.elems().len()),
+            ValueKind::Aggregate(a) => {
+                match self.info.array_info(value) {
+                    Some(dim) => self.to_type_zero_array(dim.clone()),
+                    None => Type::get_array(program.borrow_value(a.elems()[0]).ty().clone(), a.elems().len()),
+                }
+            }
             _ => panic!("init shouldn't be this kind")
+        }
+    }
+
+    pub fn to_type_zero_array(&self, array_info: Vec<usize>) -> Type {
+        if array_info.is_empty() {
+            Type::get_i32()
+        }
+        else {
+            Type::get_array(self.to_type_zero_array(array_info[1..].to_vec()), array_info[0])
         }
     }
 }

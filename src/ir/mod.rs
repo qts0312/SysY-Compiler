@@ -15,10 +15,11 @@ use std::fs::File;
 use crate::ir::writer::Writer;
 use crate::ir::scope::Scope;
 use crate::ir::translate::Translate;
+use crate::mem::info::Info;
 use koopa::ir::Program;
 
-pub fn generate_ir(program: &Program, path: &str) {
+pub fn generate_ir(program: &Program, path: &str, info: &Info) {
     let mut scope = Scope::new();
     let mut f = File::create(path).unwrap();
-    program.translate(program, &mut scope, &mut Writer::new(&mut f));
+    program.translate(program, &mut scope, &mut Writer::new(&mut f, info));
 }
