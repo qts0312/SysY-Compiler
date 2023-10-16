@@ -26,6 +26,8 @@ macro_rules! new_register {
             $scope.spill(value);
 
             let register = $scope.register_mut(&name);
+            register.used = false;
+            register.value = None;
             register
         }
     };
@@ -46,6 +48,9 @@ pub struct Scope {
     caller: bool,
 
     label: Label,
+
+    // beta
+    store_pair: (String, Entry, usize),
 }
 
 impl Scope {
@@ -59,6 +64,7 @@ impl Scope {
             used_slots: 0,
             caller: false,
             label: Label::new(),
+            store_pair: (String::new(), Entry::Register(String::from("not exist")), 0),
         }
     }
 
@@ -146,7 +152,13 @@ impl Scope {
         match (unused, oldest) {
             (Some(unused), _) => unused,
             (_, Some(oldest)) => {
-                w.op2("sw", oldest.name(), &format!("{}(sp)", slot * 4));
+                if slot < 512 {
+                    w.op2("sw", oldest.name(), &format!("{}(sp)", slot * 4));
+                } else {
+                    w.op2("li", "t6", &format!("{}", slot * 4));
+                    w.op3("add", "t6", "sp", "t6");
+                    w.op2("sw", oldest.name(), "0(t6)");
+                }
                 oldest
             }
             _ => panic!("all registers fixed"),
@@ -161,5 +173,9 @@ impl Scope {
             }
             None => {}
         }
+    }
+
+    pub fn store_pair_mut(&mut self) -> &mut (String, Entry, usize) {
+        &mut self.store_pair
     }
 }

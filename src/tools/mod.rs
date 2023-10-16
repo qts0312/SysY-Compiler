@@ -167,7 +167,7 @@ impl TurnInto<usize> for Type {
 
 pub fn get_size_form_ty(ty: &Type) -> usize {
     match ty.kind() {
-        TypeKind::Int32 => 4,
+        TypeKind::Int32 => 1,
         TypeKind::Array(ty, len) => len * get_size_form_ty(ty),
         _ => panic!("we only expect int32 and array type"),
     }

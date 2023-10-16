@@ -54,7 +54,7 @@ impl Registers {
                 Register::new("t3".to_string()),
                 Register::new("t4".to_string()),
                 Register::new("t5".to_string()),
-                Register::new("t6".to_string()),
+                Register::with_fixed("t6".to_string()),
             ],
         }
     }

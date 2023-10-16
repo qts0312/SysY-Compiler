@@ -31,11 +31,11 @@ impl Info {
     }
 
     pub fn new_info(&mut self, value: Value) {
+        self.counter += 1;
         self.value_infos.insert(value, ValueInfo {
             birth: self.counter,
             death: self.counter
         });
-        self.counter += 1;
     }
 
     pub fn info(&self, value: Value) -> Option<&ValueInfo> {

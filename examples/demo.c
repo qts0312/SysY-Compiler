@@ -1,89 +1,64 @@
-const int N = 1024;
+int init = 0;
 
-void mm(int n, int A[][N], int B[][N], int C[][N]){
-    int i, j, k;
-
-    i = 0; j = 0;
-    while (i < n){
-        j = 0;
-        while (j < n){
-            C[i][j] = 0;
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-
-    i = 0; j = 0; k = 0;
-
-    while (k < n){
-        i = 0;
-        while (i < n){
-            if (A[i][k] == 0){
-                i = i + 1;
-                continue;
-            }
-            j = 0;
-            while (j < n){
-                C[i][j] = C[i][j] + A[i][k] * B[k][j];
-                j = j + 1;
-            }
-            i = i + 1;
-        }
-        k = k + 1;
-    }
+void init1d(int n, int arr[]) {
+  int i = 0;
+  while (i < n) {
+    arr[i] = init;
+    init = init + 1;
+    i = i + 1;
+  }
 }
 
-int A[N][N];
-int B[N][N];
-int C[N][N];
+void init2d(int n, int arr[][10]) {
+  int i = 0;
+  while (i < n) {
+    init1d(10, arr[i]);
+    i = i + 1;
+  }
+}
 
-int main(){
-    int n = getint();
-    int i, j;
+void init3d(int n, int arr[][10][10]) {
+  int i = 0;
+  while (i < n) {
+    init2d(10, arr[i]);
+    i = i + 1;
+  }
+}
 
-    i = 0;
-    j = 0;
-    while (i < n){
-        j = 0;
-        while (j < n){
-            A[i][j] = getint();
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    i = 0;
-    j = 0;
-    while (i < n){
-        j = 0;
-        while (j < n){
-            B[i][j] = getint();
-            j = j + 1;
-        }
-        i = i + 1;
-    }
+int sum1d(int n, int arr[]) {
+  int i = 0, sum = 0;
+  while (i < n) {
+    sum = sum + arr[i];
+    i = i + 1;
+  }
+  return sum;
+}
 
-    starttime();
+int sum2d(int n, int arr[][10]) {
+  int i = 0, sum = 0;
+  while (i < n) {
+    sum = sum + sum1d(10, arr[i]);
+    i = i + 1;
+  }
+  return sum;
+}
 
-    i = 0;
-    while (i < 5){    
-        mm(n, A, B, C);
-        mm(n, A, C, B);
-        i = i + 1;
-    }
+int sum3d(int n, int arr[][10][10]) {
+  int i = 0, sum = 0;
+  while (i < n) {
+    sum = sum + sum2d(10, arr[i]);
+    i = i + 1;
+  }
+  return sum;
+}
 
-    int ans = 0;
-    i = 0;
-    while (i < n){
-        j = 0;
-        while (j < n){
-            ans = ans + B[i][j];
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    stoptime();
-    putint(ans);
-    putch(10);
-
-    return 0;
+int main() {
+  int arr[10][10][10];
+  init3d(10, arr);
+  int sum = sum3d(10, arr);
+  sum = sum + sum2d(10, arr[1]);
+  sum = sum + sum1d(10, arr[2][3]);
+  putint(sum);
+  putch(10);
+  return sum;
 }

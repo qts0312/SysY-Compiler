@@ -10,7 +10,7 @@ use crate::tools::get_size_form_ty;
 use crate::mem::info::Info;
 use koopa::ir::{ Program, FunctionData, Value, ValueKind, TypeKind, BinaryOp };
 use koopa::ir::entities::ValueData;
-use koopa::ir::values::{ Integer, Return, Binary, Alloc, Load };
+use koopa::ir::values::{ Integer, Return, Binary, Alloc, Load, Store, Branch, Jump, Call, GlobalAlloc, GetElemPtr, GetPtr };
 
 pub trait Asm {
     fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info);
@@ -47,6 +47,7 @@ impl Asm for FunctionData {
         let mut max_args = 0;
         for (_, value) in self.dfg().values() {
             match value.kind() {
+                ValueKind::Integer(_) => slots += 1,
                 ValueKind::Alloc(_) => {
                     match value.ty().kind() {
                         TypeKind::Pointer(base) => {
@@ -89,13 +90,69 @@ impl Asm for FunctionData {
                 w.note(&format!("{}:", name));
             }
 
+            let mut end = false;
             for(value, _) in node.insts() {
                 if let ValueKind::Return(_) = self.dfg().value(value.clone()).kind() {
                     with_ret = true;
                 }
                 current = info.info(value.clone()).unwrap().birth;
                 scope.set_cur_value(Some(value.clone()));
-                self.dfg().value(value.clone()).asm(program, scope, w, info);
+                let data = self.dfg().value(value.clone());
+
+                match data.kind() {
+                    ValueKind::Return(_) => end = true,
+                    ValueKind::Jump(_) => end = true,
+                    ValueKind::Branch(_) => end = true,
+                    _ => {}
+                }
+
+                if end {
+                    // because end value won't allocat register, so we can do register work before
+
+                    // after a value, all the value dead before current should be removed from registers
+                    for register in scope.registers_mut() {
+                        match register.value {
+                            Some(value) => {
+                                if info.info(value.clone()).unwrap().death <= current {
+                                    register.used = false;
+                                    register.value = None;
+                                }
+                            }
+                            None => {}
+                        }
+                    }
+
+                    // after a block, all the registers should be free and all the values in registers should be spilled
+                    let mut values: Vec<(String, Value)> = vec![];
+                    for register in scope.registers_mut() {
+                        match register.value {
+                            Some(value) => {
+                                register.used = false;
+                                register.value = None;
+                                values.push((register.name().to_string(), value.clone()));
+                            }
+                            None => {}
+                        }
+                    }
+
+                    for (name, value) in values {
+                        let slot = scope.new_slot();
+                        if slot < 512 {
+                            w.op2("sw", &name, &format!("{}(sp)", slot * 4));
+                        }
+                        else {
+                            w.op2("li", "t6", &format!("{}", slot * 4));
+                            w.op3("add", "t6", "t6", "sp");
+                            w.op2("sw", &name, "0(t6)");
+                        }
+                        scope.new_value(value, Entry::Slot(slot));
+                    }
+
+                    data.asm(program, scope, w, info);
+                    continue;
+                }
+
+                data.asm(program, scope, w, info);
 
                 // after a value, all the value dead before current should be removed from registers
                 for register in scope.registers_mut() {
@@ -111,23 +168,32 @@ impl Asm for FunctionData {
                 }
             }
 
-            // after a block, all the registers should be free and all the values in registers should be spilled
-            let mut values: Vec<(String, Value)> = vec![];
-            for register in scope.registers_mut() {
-                match register.value {
-                    Some(value) => {
-                        register.used = false;
-                        register.value = None;
-                        values.push((register.name().to_string(), value.clone()));
+            if end == false {
+                // after a block, all the registers should be free and all the values in registers should be spilled
+                let mut values: Vec<(String, Value)> = vec![];
+                for register in scope.registers_mut() {
+                    match register.value {
+                        Some(value) => {
+                            register.used = false;
+                            register.value = None;
+                            values.push((register.name().to_string(), value.clone()));
+                        }
+                        None => {}
                     }
-                    None => {}
                 }
-            }
 
-            for (name, value) in values {
-                let slot = scope.new_slot();
-                w.op2("sw", &name, &format!("{}(sp)", slot * 4));
-                scope.new_value(value, Entry::Slot(slot));
+                for (name, value) in values {
+                    let slot = scope.new_slot();
+                    if slot < 512 {
+                        w.op2("sw", &name, &format!("{}(sp)", slot * 4));
+                    }
+                    else {
+                        w.op2("li", "t6", &format!("{}", slot * 4));
+                        w.op3("add", "t6", "t6", "sp");
+                        w.op2("sw", &name, "0(t6)");
+                    }
+                    scope.new_value(value, Entry::Slot(slot));
+                }
             }
         }
 
@@ -147,21 +213,23 @@ impl Asm for ValueData {
             ValueKind::Return(ret) => ret.asm(program, scope, w, info),
             ValueKind::Binary(binary) => binary.asm(program, scope, w, info),
             ValueKind::Alloc(alloc) => alloc.asm(program, scope, w, info),
-            // ValueKind::Load(load) => load.asm(program, scope, w, info),
-            // ValueKind::Store(store) => store.asm(program, scope, w, info),
-            // ValueKind::Branch(branch) => branch.asm(program, scope, w, info),
-            // ValueKind::Jump(jump) => jump.asm(program, scope, w, info),
-            // ValueKind::Call(call) => call.asm(program, scope, w, info),
-            // ValueKind::GlobalAlloc(global_alloc) => global_alloc.asm(program, scope, w, info),
-            // ValueKind::GetElemPtr(get_elem_ptr) => get_elem_ptr.asm(program, scope, w, info),
-            // ValueKind::GetPtr(get_ptr) => get_ptr.asm(program, scope, w, info),
+            ValueKind::Load(load) => load.asm(program, scope, w, info),
+            ValueKind::Store(store) => store.asm(program, scope, w, info),
+            ValueKind::Branch(branch) => branch.asm(program, scope, w, info),
+            ValueKind::Jump(jump) => jump.asm(program, scope, w, info),
+            ValueKind::Call(call) => call.asm(program, scope, w, info),
+            ValueKind::GlobalAlloc(global_alloc) => global_alloc.asm(program, scope, w, info),
+            ValueKind::GetElemPtr(get_elem_ptr) => get_elem_ptr.asm(program, scope, w, info),
+            ValueKind::GetPtr(get_ptr) => get_ptr.asm(program, scope, w, info),
             _ => panic!("not support this value")
         }
+        w.line();
     }
 }
 
 impl Asm for Integer {
     fn asm(&self, _: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# integer");
         if self.value() == 0 {
             scope.new_value(scope.cur_value().clone(), Entry::Register("x0".to_string()));
         }
@@ -183,10 +251,21 @@ impl Asm for Integer {
 
 impl Asm for Return {
     fn asm(&self, _: &Program, scope: &mut Scope, w: &mut Writer, _: &mut Info) {
+        w.note("# return");
         if let Some(value) = self.value() {
             let entry = scope.value(&value).clone();
             match entry {
-                Entry::Slot(slot) => w.op2("lw", "a0", &format!("{}(sp)", slot * 4)),
+                Entry::Slot(slot) => {
+                    if slot <512 {
+                        w.op2("lw", "a0", &format!("{}(sp)", slot * 4))
+                    }
+                    else {
+                        let temporary = scope.new_register(w).name().to_string();
+                        w.op2("li", &temporary, &format!("{}", slot * 4));
+                        w.op3("add", &temporary, &temporary, "sp");
+                        w.op2("lw", "a0", &format!("0({})", temporary));
+                    }
+                }
                 Entry::Register(name) => w.op2("mv", "a0", &name),
                 Entry::Label(label) => {
                     let temporary = scope.new_register(w);
@@ -201,36 +280,62 @@ impl Asm for Return {
 
 impl Asm for Binary {
     fn asm(&self, _: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# binary");
         let entry = scope.value(&self.lhs()).clone();
+
+        let mut lhs_flag = false;
         let lhs = match entry {
             Entry::Slot(slot) => {
-                let temporary = scope.new_register(w);
-                w.op2("lw", temporary.name(), &format!("{}(sp)", slot * 4));
-                temporary.name().to_string()
+                let temporary = scope.new_register(w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                lhs_flag = true;
+                if slot < 512 {
+                    w.op2("lw", &temporary, &format!("{}(sp)", slot * 4));
+                }
+                else {
+                    w.op2("li", &temporary, &format!("{}", slot * 4));
+                    w.op3("add", &temporary, &temporary, "sp");
+                    w.op2("lw", &temporary, &format!("0({})", temporary));
+                }
+                temporary
             }
             Entry::Register(name) => name.to_string(),
             Entry::Label(label) => {
-                let temporary = scope.new_register(w);
-                w.op2("la", temporary.name(), &label);
-                w.op2("lw", temporary.name(), &format!("0({})", temporary.name()));
-                temporary.name().to_string()
+                let temporary = scope.new_register(w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                lhs_flag = true;
+                w.op2("la", &temporary, &label);
+                w.op2("lw", &temporary, &format!("0({})", temporary));
+                temporary
             }
         };
         let entry = scope.value(&self.rhs()).clone();
         let rhs = match entry {
             Entry::Slot(slot) => {
-                let temporary = scope.new_register(w);
-                w.op2("lw", temporary.name(), &format!("{}(sp)", slot * 4));
-                temporary.name().to_string()
+                let temporary = scope.new_register(w).name().to_string();
+                if slot < 512 {
+                    w.op2("lw", &temporary, &format!("{}(sp)", slot * 4));
+                }
+                else {
+                    w.op2("li", &temporary, &format!("{}", slot * 4));
+                    w.op3("add", &temporary, &temporary, "sp");
+                    w.op2("lw", &temporary, &format!("0({})", temporary));
+                }
+                temporary
             }
             Entry::Register(name) => name.to_string(),
             Entry::Label(label) => {
-                let temporary = scope.new_register(w);
-                w.op2("la", temporary.name(), &label);
-                w.op2("lw", temporary.name(), &format!("0({})", temporary.name()));
-                temporary.name().to_string()
+                let temporary = scope.new_register(w).name().to_string();
+                w.op2("la", &temporary, &label);
+                w.op2("lw", &temporary, &format!("0({})", &temporary));
+                temporary
             }
         };
+
+        if lhs_flag {
+            scope.register_mut(&lhs).fixed = false;
+        }
+
         let value = scope.cur_value().clone();
         let register = new_register!(scope, w);
         register.used = true;
@@ -273,6 +378,7 @@ impl Asm for Binary {
 
 impl Asm for Alloc {
     fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# alloc");
         let func = scope.cur_func().clone();
         let value = scope.cur_value().clone();
         let size = match program.func(func).dfg().value(value.clone()).ty().kind() {
@@ -294,6 +400,23 @@ impl Asm for Alloc {
 
 impl Asm for Load {
     fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# load");
+        // if load the value jsut store, we skip load
+        let entry = scope.value(&self.src()).clone();
+        let idx = info.info(scope.cur_value().clone()).unwrap().birth;
+        if entry == scope.store_pair_mut().1 && idx == scope.store_pair_mut().2 + 1{
+            let value = scope.cur_value().clone();
+            let name = scope.store_pair_mut().0.clone();
+            let register = scope.register_mut(&name);
+            register.used = true;
+            register.stamp = idx;
+            register.value = Some(value.clone());
+
+            let register = register.name().to_string();
+            scope.new_value(value, Entry::Register(register));
+            return;
+        }
+
         let is_addr = if self.src().is_global() {
             match program.borrow_value(self.src()).kind() {
                 ValueKind::GetElemPtr(_) => true,
@@ -307,5 +430,571 @@ impl Asm for Load {
                 _ => false,
             }
         };
+
+        let value = scope.cur_value().clone();
+        let register = new_register!(scope, w);
+        register.used = true;
+        register.stamp = info.info(value.clone()).unwrap().birth;
+        register.value = Some(value.clone());
+
+        let dst = register.name().to_string();
+        scope.new_value(value.clone(), Entry::Register(dst.clone()));
+
+        match scope.value(&self.src()) {
+            Entry::Slot(offset) => {
+                if is_addr {
+                    if (*offset) < 512 {
+                        w.op2("lw", &dst, &format!("{}(sp)", offset * 4));
+                    } else {
+                        w.op2("li", &dst, &format!("{}", offset * 4));
+                        w.op3("add", &dst, &dst, "sp");
+                        w.op2("lw", &dst, &format!("0({})", &dst));
+                    }
+                    w.op2("lw", &dst, &format!("0({})", &dst));
+                }
+                else {
+                    if (*offset) < 512 {
+                        w.op2("lw", &dst, &format!("{}(sp)", offset * 4));
+                    } else {
+                        w.op2("li", &dst, &format!("{}", offset * 4));
+                        w.op3("add", &dst, &dst, "sp");
+                        w.op2("lw", &dst, &format!("0({})", &dst));
+                    }
+                }
+            }
+            Entry::Label(label) => {
+                w.op2("la", &dst, &label);
+                w.op2("lw", &dst, &format!("0({})", &dst));
+            }
+            Entry::Register(name) => {
+                if is_addr {
+                    w.op2("lw", &dst, &format!("0({})", &name));
+                }
+                else {
+                    panic!("load from register")
+                }
+            }
+        }
+    }
+}
+
+impl Asm for Store {
+    fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# store");
+        match program.func(scope.cur_func().clone()).dfg().value(self.value()).kind() {
+            ValueKind::FuncArgRef(arg) => {
+                let offset = match scope.value(&self.dest()) {
+                    Entry::Slot(offset) => *offset,
+                    _ => panic!("should store function argument in stack")
+                };
+                if arg.index() < 8 {
+                    w.op2("sw", &format!("a{}", arg.index()), &format!("{}(sp)", offset * 4));
+                }
+                else {
+                    let temporary = new_register!(scope, w).name().to_string();
+                    w.op2("lw", &temporary, &format!("{}(sp)", (arg.index() as usize - 8 + scope.total_slots()) * 4));
+                    w.op2("sw", &temporary, &format!("{}(sp)", offset * 4));
+                }
+                return;
+            }
+            _ => {}
+        }
+
+        let is_addr = if self.dest().is_global() {
+            match program.borrow_value(self.dest()).kind() {
+                ValueKind::GetElemPtr(_) => true,
+                ValueKind::GetPtr(_) => true,
+                _ => false,
+            }
+        } else {
+            match program.func(scope.cur_func().clone()).dfg().value(self.dest()).kind() {
+                ValueKind::GetElemPtr(_) => true,
+                ValueKind::GetPtr(_) => true,
+                _ => false,
+            }
+        };
+        
+        let src_entry = scope.value(&self.value()).clone();
+        let mut src_flag = false;
+
+        let src = match src_entry {
+            Entry::Slot(offset) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                src_flag = true;
+                if offset < 512 {
+                    w.op2("lw", &temporary, &format!("{}(sp)", offset * 4));
+                }
+                else {
+                    w.op2("li", &temporary, &format!("{}", offset * 4));
+                    w.op3("add", &temporary, &temporary, "sp");
+                    w.op2("lw", &temporary, &format!("0({})", temporary));
+                }
+                temporary
+            }
+            Entry::Register(name) => name.to_string(),
+            Entry::Label(label) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                src_flag = true;
+                w.op2("la", &temporary, &label);
+                w.op2("lw", &temporary, &format!("0({})", &temporary));
+                temporary
+            }
+        };
+
+        let dst_entry = scope.value(&self.dest()).clone();
+        match dst_entry {
+            Entry::Slot(offset) => {
+                if is_addr {
+                    let temporary = new_register!(scope, w).name().to_string();
+                    if offset < 512 {
+                        w.op2("lw", &temporary, &format!("{}(sp)", offset * 4));
+                    }
+                    else {
+                        w.op2("li", &temporary, &format!("{}", offset * 4));
+                        w.op3("add", &temporary, &temporary, "sp");
+                        w.op2("lw", &temporary, &format!("0({})", temporary));
+                    }
+                    w.op2("sw", &src, &format!("0({})", &temporary));
+                }
+                else {
+                    if offset < 512 {
+                        w.op2("sw", &src, &format!("{}(sp)", offset * 4));
+                    }
+                    else {
+                        let temporary = new_register!(scope, w).name().to_string();
+                        w.op2("li", &temporary, &format!("{}", offset * 4));
+                        w.op3("add", &temporary, &temporary, "sp");
+                        w.op2("sw", &src, &format!("0({})", temporary));
+                    }
+                }
+            }
+            Entry::Label(label) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                w.op2("la", &temporary, &label);
+                w.op2("sw", &src, &format!("0({})", &temporary));
+            }
+            Entry::Register(name) => {
+                if is_addr {
+                    w.op2("sw", &src, &format!("0({})", &name));
+                }
+                else {
+                    panic!("store to register")
+                }
+            } 
+        }
+
+        if src_flag {
+            scope.register_mut(&src).fixed = false;
+        }
+
+        let dst_entry = scope.value(&self.dest()).clone();
+        scope.store_pair_mut().0 = src;
+        scope.store_pair_mut().1 = dst_entry;
+        scope.store_pair_mut().2 = info.info(scope.cur_value().clone()).unwrap().birth;
+    }
+}
+
+impl Asm for Branch {
+    fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# branch");
+        let cond_entry = scope.value(&self.cond()).clone();
+        let cond = match cond_entry {
+            Entry::Slot(offset) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                if offset < 512 {
+                    w.op2("lw", &temporary, &format!("{}(sp)", offset * 4));
+                }
+                else {
+                    w.op2("li", &temporary, &format!("{}", offset * 4));
+                    w.op3("add", &temporary, &temporary, "sp");
+                    w.op2("lw", &temporary, &format!("0({})", temporary));
+                }
+                temporary
+            }
+            Entry::Register(name) => name.to_string(),
+            Entry::Label(label) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                w.op2("la", &temporary, &label);
+                w.op2("lw", &temporary, &format!("0({})", &temporary));
+                temporary
+            }
+        };
+
+        let then = program.func(scope.cur_func().clone()).dfg().bb(self.true_bb()).name().as_ref().unwrap()[1..].to_string();
+        let els = program.func(scope.cur_func().clone()).dfg().bb(self.false_bb()).name().as_ref().unwrap()[1..].to_string();
+
+        w.op2("bnez", &cond, &then);
+        w.op1("j", &els);
+    }
+}
+
+impl Asm for Jump {
+    fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# jump");
+        let dst = program.func(scope.cur_func().clone()).dfg().bb(self.target()).name().as_ref().unwrap()[1..].to_string();
+        w.op1("j", &dst);
+    }
+}
+
+impl Asm for Call {
+    fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# call");
+        let mut count = 0;
+        for arg in self.args() {
+            let arg_entry = scope.value(&arg).clone();
+            if count < 8 {
+                match arg_entry {
+                    Entry::Slot(offset) => {
+                        if offset < 512 {
+                            w.op2("lw", &format!("a{}", count), &format!("{}(sp)", offset * 4));
+                        }
+                        else {
+                            let temporary = new_register!(scope, w).name().to_string();
+                            w.op2("li", &temporary, &format!("{}", offset * 4));
+                            w.op3("add", &temporary, &temporary, "sp");
+                            w.op2("lw", &format!("a{}", count), &format!("0({})", &temporary));
+                        }
+                    }
+                    Entry::Register(name) => w.op2("mv", &format!("a{}", count), &name),
+                    Entry::Label(label) => {
+                        let temporary = new_register!(scope, w).name().to_string();
+                        w.op2("la", &temporary, &label);
+                        w.op2("lw", &format!("a{}", count), &format!("0({})", &temporary));
+                    }
+                }
+            }
+            else {
+                match arg_entry {
+                    Entry::Slot(offset) => {
+                        let temporary = new_register!(scope, w).name().to_string();
+                        if offset < 512 {
+                            w.op2("lw", &temporary, &format!("{}(sp)", offset * 4));
+                        }
+                        else {
+                            w.op2("li", &temporary, &format!("{}", offset * 4));
+                            w.op3("add", &temporary, &temporary, "sp");
+                            w.op2("lw", &temporary, &format!("0({})", temporary));
+                        }
+                        w.op2("sw", &temporary, &format!("{}(sp)", (count - 8) * 4));
+                    }
+                    Entry::Register(name) => w.op2("sw", &name, &format!("{}(sp)", (count - 8) * 4)),
+                    Entry::Label(label) => {
+                        let temporary = new_register!(scope, w).name().to_string();
+                        w.op2("la", &temporary, &label);
+                        w.op2("lw", &temporary, &format!("0({})", &temporary));
+                        w.op2("sw", &temporary, &format!("{}(sp)", (count - 8) * 4));
+                    }
+                }
+            }
+            count += 1;
+        }
+
+        // before call, spill all used registers into stack
+        let current = info.info(scope.cur_value().clone()).unwrap().birth;
+        for register in scope.registers_mut() {
+            match register.value {
+                Some(value) => {
+                    if info.info(value.clone()).unwrap().death <= current {
+                        register.used = false;
+                        register.value = None;
+                    }
+                }
+                None => {}
+            }
+        }
+
+        let mut values: Vec<(String, Value)> = vec![];
+        for register in scope.registers_mut() {
+            match register.value {
+                Some(value) => {
+                    register.used = false;
+                    register.value = None;
+                    values.push((register.name().to_string(), value.clone()));
+                }
+                None => {}
+            }
+        }
+
+        for (name, value) in values {
+            let slot = scope.new_slot();
+            if slot < 512 {
+                w.op2("sw", &name, &format!("{}(sp)", slot * 4));
+            }
+            else {
+                w.op2("li", "t6", &format!("{}", slot * 4));
+                w.op3("add", "t6", "t6", "sp");
+                w.op2("sw", &name, "0(t6)");
+            }
+            scope.new_value(value, Entry::Slot(slot));
+        }
+
+        let name = program.func(self.callee()).name()[1..].to_string();
+        w.op1("call", &name);
+
+        let slot = scope.new_slot();
+        if slot < 512 {
+            w.op2("sw", "a0", &format!("{}(sp)", slot * 4));
+        }
+        else {
+            let temporary = scope.new_register(w).name().to_string();
+            w.op2("li", &temporary, &format!("{}", slot * 4));
+            w.op3("add", &temporary, &temporary, "sp");
+            w.op2("sw", "a0", &format!("0({})", temporary));
+        }
+
+        let value = scope.cur_value().clone();
+        scope.new_value(value, Entry::Slot(slot));
+    }
+}
+
+impl Asm for GlobalAlloc {
+    fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# global alloc");
+        let label = scope.label_mut().var();
+        w.note(&format!("  .globl {}", label));
+        w.note(&format!("{}:", label));
+        scope.new_value(scope.cur_value().clone(), Entry::Label(label));
+
+        match program.borrow_value(self.init()).kind() {
+            ValueKind::Integer(i) => w.note(&format!("  .word {}", i.value())),
+            ValueKind::ZeroInit(_) => w.note("  .zero 4"),
+            ValueKind::Aggregate(a) => {
+                match info.array_info(scope.cur_value().clone()) {
+                    Some(dims) => {
+                        let length = dims.iter().fold(1, |acc, dim| acc * dim);
+                        w.note(&format!("  .zero {}", 4 * length));
+                    }
+                    None => w.aggregate(program, self.init()),
+                }
+            }
+            _ => panic!("init value should not be this kind")
+        }
+    }
+}
+
+impl Asm for GetElemPtr {
+    fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# get element pointer");
+        let is_addr = if self.src().is_global() {
+            match program.borrow_value(self.src()).kind() {
+                ValueKind::GetElemPtr(_) => true,
+                ValueKind::GetPtr(_) => true,
+                _ => false,
+            }
+        } else {
+            match program.func(scope.cur_func().clone()).dfg().value(self.src()).kind() {
+                ValueKind::GetElemPtr(_) => true,
+                ValueKind::GetPtr(_) => true,
+                _ => false,
+            }
+        };
+        
+        let base_entry = scope.value(&self.src()).clone();
+        let mut base_flag = false;
+        let base = match base_entry {
+            Entry::Slot(offset) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                base_flag = true;
+                if is_addr {
+                    if offset < 512 {
+                        w.op2("lw", &temporary, &format!("{}(sp)", offset * 4));
+                    }
+                    else {
+                        w.op2("li", &temporary, &format!("{}", offset * 4));
+                        w.op3("add", &temporary, &temporary, "sp");
+                        w.op2("lw", &temporary, &format!("0({})", temporary));
+                    }
+                }
+                else {
+                    if offset < 512 {
+                        w.op3("addi", &temporary, "sp", &format!("{}", offset * 4));
+                    }
+                    else {
+                        w.op2("li", &temporary, &format!("{}", offset * 4));
+                        w.op3("add", &temporary, "sp", &temporary);
+                    }
+                }
+                temporary
+            }
+            Entry::Register(name) => name.to_string(),
+            Entry::Label(label) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                base_flag = true;
+                w.op2("la", &temporary, &label);
+                temporary
+            }
+        };
+
+        let index_entry = scope.value(&self.index()).clone();
+        let mut index_flag = false;
+        let index = match index_entry {
+            Entry::Slot(offset) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                index_flag = true;
+                if offset < 512 {
+                    w.op2("lw", &temporary, &format!("{}(sp)", offset * 4));
+                }
+                else {
+                    w.op2("li", &temporary, &format!("{}", offset * 4));
+                    w.op3("add", &temporary, &temporary, "sp");
+                    w.op2("lw", &temporary, &format!("0({})", temporary));
+                }
+                temporary
+            }
+            Entry::Register(name) => name.to_string(),
+            Entry::Label(_) => panic!("index should not be in label"),
+        };
+
+        let size = if self.src().is_global() {
+            match program.borrow_value(self.src()).ty().kind() {
+                TypeKind::Pointer(ty) => {
+                    match ty.kind() {
+                        TypeKind::Int32 => 4,
+                        TypeKind::Array(base, _) => w.to_size(base) * 4,
+                        TypeKind::Pointer(base) => w.to_size(base) * 4,
+                        _ => panic!("we only implement these types")
+                    }
+                }
+                _ => panic!("alloc should be pointer type")
+            }
+        } else {
+            match program.func(scope.cur_func().clone()).dfg().value(self.src()).ty().kind() {
+                TypeKind::Pointer(ty) => {
+                    match ty.kind() {
+                        TypeKind::Int32 => 4,
+                        TypeKind::Array(base, _) => w.to_size(base) * 4,
+                        TypeKind::Pointer(base) => w.to_size(base) * 4,
+                        _ => panic!("we only implement these types")
+                    }
+                }
+                _ => panic!("alloc should be pointer type")
+            }
+        };
+
+        let value = scope.cur_value().clone();
+        let register = new_register!(scope, w);
+        register.used = true;
+        register.stamp = info.info(value.clone()).unwrap().birth;
+        register.value = Some(value.clone());
+
+        let dst = register.name().to_string();
+        scope.new_value(value.clone(), Entry::Register(dst.clone()));
+
+        let temporary = new_register!(scope, w).name().to_string();
+        if base_flag {
+            scope.register_mut(&base).fixed = false;
+        }
+        if index_flag {
+            scope.register_mut(&index).fixed = false;
+        }
+
+        w.op2("li", &temporary, &format!("{}", size));
+        w.op3("mul", &temporary, &index, &temporary);
+        w.op3("add", &dst, &base, &temporary);
+    }
+}
+
+impl Asm for GetPtr {
+    fn asm(&self, program: &Program, scope: &mut Scope, w: &mut Writer, info: &mut Info) {
+        w.note("# get pointer");
+        let base_entry = scope.value(&self.src()).clone();
+        let mut base_flag = false;
+        let base = match base_entry {
+            Entry::Slot(offset) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                base_flag = true;
+                if offset < 512 {
+                    w.op2("lw", &temporary, &format!("{}(sp)", offset * 4));
+                }
+                else {
+                    w.op2("li", &temporary, &format!("{}", offset * 4));
+                    w.op3("add", &temporary, &temporary, "sp");
+                    w.op2("lw", &temporary, &format!("0({})", temporary));
+                }
+                temporary
+            }
+            Entry::Register(name) => name.to_string(),
+            Entry::Label(label) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                base_flag = true;
+                w.op2("la", &temporary, &label);
+                temporary
+            }
+        };
+        
+        let index_entry = scope.value(&self.index()).clone();
+        let mut index_flag = false;
+        let index = match index_entry {
+            Entry::Slot(offset) => {
+                let temporary = new_register!(scope, w).name().to_string();
+                scope.register_mut(&temporary).fixed = true;
+                index_flag = true;
+                if offset < 512 {
+                    w.op2("lw", &temporary, &format!("{}(sp)", offset * 4));
+                }
+                else {
+                    w.op2("li", &temporary, &format!("{}", offset * 4));
+                    w.op3("add", &temporary, &temporary, "sp");
+                    w.op2("lw", &temporary, &format!("0({})", temporary));
+                }
+                temporary
+            }
+            Entry::Register(name) => name.to_string(),
+            Entry::Label(_) => panic!("index should not be in label"),
+        };
+
+        let size = if self.src().is_global() {
+            match program.borrow_value(self.src()).ty().kind() {
+                TypeKind::Pointer(ty) => {
+                    match ty.kind() {
+                        TypeKind::Int32 => 4,
+                        TypeKind::Array(base, _) => w.to_size(base) * 4,
+                        TypeKind::Pointer(base) => w.to_size(base) * 4,
+                        _ => panic!("we only implement these types")
+                    }
+                }
+                _ => panic!("alloc should be pointer type")
+            }
+        } else {
+            match program.func(scope.cur_func().clone()).dfg().value(self.src()).ty().kind() {
+                TypeKind::Pointer(ty) => {
+                    match ty.kind() {
+                        TypeKind::Int32 => 4,
+                        TypeKind::Array(base, length) => w.to_size(base) * 4 * (*length),
+                        TypeKind::Pointer(base) => w.to_size(base) * 4,
+                        _ => panic!("we only implement these types")
+                    }
+                }
+                _ => panic!("alloc should be pointer type")
+            }
+        };
+
+        let value = scope.cur_value().clone();
+        let register = new_register!(scope, w);
+        register.used = true;
+        register.stamp = info.info(value.clone()).unwrap().birth;
+        register.value = Some(value.clone());
+
+        let dst = register.name().to_string();
+        scope.new_value(value.clone(), Entry::Register(dst.clone()));
+
+        let temporary = new_register!(scope, w).name().to_string();
+        if base_flag {
+            scope.register_mut(&base).fixed = false;
+        }
+        if index_flag {
+            scope.register_mut(&index).fixed = false;
+        }
+
+        w.op2("li", &temporary, &format!("{}", size));
+        w.op3("mul", &temporary, &index, &temporary);
+        w.op3("add", &dst, &base, &temporary);
     }
 }

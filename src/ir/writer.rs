@@ -21,10 +21,6 @@ impl<'f> Writer<'f> {
         }
     }
 
-    pub fn note(&mut self, s: &str) {
-        writeln!(self.f, "{}", s).unwrap();
-    }
-
     pub fn ty(&self, ty: &Type) -> String {
         match ty.kind() {
             TypeKind::Int32 => "i32".to_string(),
@@ -148,10 +144,6 @@ impl<'f> Writer<'f> {
 
     pub fn jump(&mut self, dst: &str) {
         writeln!(self.f, "  jump {}", dst).unwrap();
-    }
-
-    pub fn line(&mut self) {
-        writeln!(self.f, "").unwrap();
     }
 
     pub fn to_init(&self, value: Value, program: &Program) -> String {
