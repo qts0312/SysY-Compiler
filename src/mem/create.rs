@@ -4,7 +4,6 @@
 //! 
 
 #![allow(unused_assignments)]
-
 use crate::ast::*;
 use crate::tools::{ TurnInto, global_const_array_init, local_const_array_init, global_array_init, local_array_init };
 use crate::mem::scope::{ Scope, Entry, new_value, push_value, new_bb, push_bb };
@@ -224,8 +223,18 @@ impl<'ast> Create<'ast> for VarDef {
             if scope.is_global() {
                 let init = match &self.init {
                     Some(val) => {
+                        let mut empty_init = false;
+                        if let InitVal::List(list) = val {
+                            if list.is_empty() {
+                                empty_init = true;
+                            }
+                        }
                         let init = val.create(program, scope, info);
-                        global_array_init(program, init, array_info)
+                        let value = global_array_init(program, init, array_info.clone());
+                        if empty_init {
+                            info.new_array_info(value.clone(), array_info.clone());
+                        }
+                        value
                     }
                     None => {
                         // In this path, we will give a simple way to initialize an array with all zero.
