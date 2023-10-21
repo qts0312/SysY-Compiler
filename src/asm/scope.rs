@@ -72,10 +72,6 @@ impl Scope {
         self.values.get(value).unwrap()
     }
 
-    pub fn value_mut(&mut self, value: &Value) -> &mut Entry {
-        self.values.get_mut(value).unwrap()
-    }
-
     pub fn new_value(&mut self, value: Value, entry: Entry) {
         self.values.insert(value, entry);
     }
@@ -130,10 +126,6 @@ impl Scope {
         let slot = self.used_slots;
         self.used_slots += slots;
         slot
-    }
-
-    pub fn register(&mut self, id: &str) -> &Register {
-        self.registers.register(id)
     }
 
     pub fn register_mut(&mut self, id: &str) -> &mut Register {

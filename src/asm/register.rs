@@ -59,13 +59,6 @@ impl Registers {
         }
     }
 
-    pub fn register(&self, name: &str) -> &Register {
-        self.registers
-            .iter()
-            .find(|r| r.name() == name)
-            .expect(&format!("Register {} not found", name))
-    }
-
     pub fn register_mut(&mut self, name: &str) -> &mut Register {
         self.registers
             .iter_mut()
