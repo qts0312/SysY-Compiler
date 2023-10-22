@@ -10,7 +10,7 @@ Even though the compiler can satisfy the standard of course, there are still som
 
 ## Architecture
 
-Building a compiler is a complex task. With the help of automatic tools, I devotes most of my effort in parts below.
+Building a compiler is a complex task. With the help of automatic tools, I devote most of my effort in parts below.
 
 * `mem`: create Koopa IR in memory, based on the AST. In this process, the compiler collects information about the birth and death of values, and large arrays initialized with zero.
 * `ir`: translate Koopa IR in memory into string.
