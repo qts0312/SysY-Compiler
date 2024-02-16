@@ -15,3 +15,7 @@ Building a compiler is a complex task. With the help of automatic tools, I devot
 - `mem`: create Koopa IR in memory, based on the AST. In this process, the compiler collects information about the birth and death of values, and large arrays initialized with zero.
 - `ir`: translate Koopa IR in memory into string.
 - `asm`: generate RISC-V assembly from Koopa IR in memory. Register allocation and other optimization is done in this process.
+
+## Evaluation
+
+In performance evaluation, 20 benchmark programs compiled by the compiler are tested, which cost 278.91s in total. The compiler is ranked 5th this term.
